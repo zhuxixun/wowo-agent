@@ -38,6 +38,11 @@ async function main() {
       rl.question(q, resolve)
       rl.once('close', () => resolve('exit'))
     })
+  // 权限确认：只有用户输入 y/yes 才算同意；管道/EOF 场景默认拒绝
+  const confirm = async (question: string): Promise<boolean> => {
+    const answer = (await ask(question)).trim().toLowerCase()
+    return answer === 'y' || answer === 'yes'
+  }
 
   console.log('wowo-agent (最简陋版) — 输入 exit 退出')
 
@@ -50,7 +55,7 @@ async function main() {
     messages.push({ role: 'user', content: input })
 
     try {
-      const answer = await runAgent(llm, tools, messages)
+      const answer = await runAgent(llm, tools, messages, confirm)
       console.log(`\nagent > ${answer}`)
     } catch (err) {
       console.error(`\n出错: ${err instanceof Error ? err.message : err}`)

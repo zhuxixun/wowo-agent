@@ -3,13 +3,16 @@
 import type { LLMClient } from './llm.ts'
 import type { ToolRegistry } from './tools.ts'
 import type { Message } from './types.ts'
+import { decide } from './permission.ts'
 
 const MAX_STEPS = 25
 
+// confirm: 用户确认回调。缺省拒绝（非交互环境的安全默认）
 export async function runAgent(
   llm: LLMClient,
   tools: ToolRegistry,
   messages: Message[],
+  confirm: (question: string) => Promise<boolean> = async () => false,
 ): Promise<string> {
   for (let step = 1; step <= MAX_STEPS; step++) {
     const { message } = await llm.chat(messages, tools.listSchemas())
@@ -25,7 +28,18 @@ export async function runAgent(
       try {
         const args = JSON.parse(call.function.arguments) as Record<string, unknown>
         console.log(`  [step ${step}] ${call.function.name} ${shorten(JSON.stringify(args))}`)
-        result = await tools.execute(call.function.name, args)
+
+        // 执行前先过权限层；拒绝/允许都作为 tool 消息返回给模型，由模型自己调整策略
+        const decision = decide(call.function.name, args)
+        if (decision.action === 'deny') {
+          result = `权限拒绝: ${decision.reason}`
+        } else if (decision.action === 'ask') {
+          result = (await confirm(decision.question))
+            ? await tools.execute(call.function.name, args)
+            : '用户拒绝了该操作（权限控制）'
+        } else {
+          result = await tools.execute(call.function.name, args)
+        }
       } catch (err) {
         // 参数解析失败：把错误文本返回给模型而不是崩掉
         result = `参数解析失败: ${err instanceof Error ? err.message : String(err)}`
