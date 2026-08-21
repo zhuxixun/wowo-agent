@@ -14,7 +14,7 @@
     ├── permission.ts     # 权限层（实验 A 撞墙产物）
     ├── context.ts        # 上下文压缩（实验 B 撞墙产物）
     ├── tools.ts          # 工具注册表 + read_file / write_file / bash
-    ├── session.ts        # JSONL 会话落盘
+    ├── session.ts        # 会话层：一个会话一个文件（实验 C 撞墙产物）
     ├── bench.ts          # 基准脚本：连续投喂任务看上下文增长
     └── main.ts           # REPL 入口
 ```
@@ -24,8 +24,11 @@
 ```bash
 cd mini-harness
 export DEEPSEEK_API_KEY=sk-xxx
-npm start              # 交互模式
-npm start -- --resume  # 恢复上次会话
+npm start                    # 新会话
+npm start -- --new 名字       # 新会话并命名
+npm start -- --resume         # 恢复最近会话
+npm start -- --resume hello   # 恢复指定会话（id/名字/标题模糊匹配）
+npm start -- --list           # 列出所有会话
 ```
 
 ## 撞墙记录约定
@@ -44,3 +47,4 @@ feat: 实验 X 撞墙 — 一句话说明发现了什么问题、加了什么
 | feat | Mini Harness v1 — 最小闭环 |
 | feat(permission) | 实验 A：让 agent 删文件，它真删了 → 加权限层 |
 | feat(context) | 实验 B：上下文 10 回合涨 26 倍 → 加 Compaction 压缩 |
+| feat(session) | 实验 C：两天任务混一个 JSONL → 一个会话一个文件 |

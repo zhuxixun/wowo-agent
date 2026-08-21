@@ -1,9 +1,15 @@
 // 入口：REPL。每次对话 = 读输入 → 组装 system prompt → runAgent → 落盘
+// CLI:
+//   node main.ts                    新会话
+//   node main.ts --new <名字>        新会话并命名
+//   node main.ts --resume            恢复最近会话
+//   node main.ts --resume <id|关键字> 恢复指定会话 (id 前缀/名字/标题模糊匹配)
+//   node main.ts --list              列出所有会话
 import { createInterface } from 'node:readline'
 import { createClientFromEnv } from './llm.ts'
 import { createDefaultTools } from './tools.ts'
 import { runAgent } from './agent-loop.ts'
-import { loadSession, appendSession } from './session.ts'
+import { listSessions, resolveSession, appendSession } from './session.ts'
 import type { Message } from './types.ts'
 
 const SYSTEM_PROMPT = `你是 wowo-agent，一个运行在用户电脑上的命令行助手。
@@ -12,16 +18,52 @@ const SYSTEM_PROMPT = `你是 wowo-agent，一个运行在用户电脑上的命�
 回答要简洁，用中文。`
 
 async function main() {
-  const resume = process.argv.includes('--resume')
+  const args = process.argv.slice(2)
+
+  // --list 不需要 LLM，先处理掉
+  if (args.includes('--list')) {
+    const sessions = await listSessions()
+    if (sessions.length === 0) {
+      console.log('还没有任何会话。跑 npm start 开始第一个。')
+    } else {
+      console.log('ID                消息  更新于              标题')
+      for (const s of sessions) {
+        console.log(
+          `${s.id}  ${String(s.messageCount).padStart(4)}  ${fmtTime(s.updatedAt)}  ${s.title}`,
+        )
+      }
+    }
+    return
+  }
 
   const llm = createClientFromEnv()
   const tools = createDefaultTools()
 
+  let sessionId: string | null = null
   let messages: Message[] = []
-  if (resume) {
-    messages = await loadSession()
-    console.log(`已恢复 ${messages.length} 条历史消息`)
+
+  const newIdx = args.indexOf('--new')
+  const resumeIdx = args.indexOf('--resume')
+
+  if (newIdx >= 0) {
+    const name = args[newIdx + 1]
+    sessionId = String(Date.now()) + (name ? '-' + slugify(name) : '')
+    console.log(`新会话: ${sessionId}`)
+  } else if (resumeIdx >= 0) {
+    const query = args[resumeIdx + 1]
+    const found = await resolveSession(query)
+    if (!found) {
+      console.error(query ? `找不到会话 "${query}"` : '还没有任何会话')
+      return
+    }
+    sessionId = found.id
+    messages = found.messages
+    console.log(`已恢复会话 ${found.id} (${found.messageCount} 条消息): ${found.title}`)
+  } else {
+    sessionId = String(Date.now())
+    console.log(`新会话: ${sessionId}`)
   }
+
   // system prompt 保证始终存在（恢复旧会话时补上）
   if (messages.length === 0) messages.push({ role: 'system', content: SYSTEM_PROMPT })
   else if (messages[0].role !== 'system') messages.unshift({ role: 'system', content: SYSTEM_PROMPT })
@@ -62,10 +104,19 @@ async function main() {
       messages.length = persisted // 回滚本次对话的全部消息，避免污染上下文
     }
 
-    await appendSession(messages, persisted)
+    await appendSession(sessionId, messages, persisted)
   }
 
   rl.close()
+}
+
+function slugify(s: string): string {
+  return s.replace(/[^\w\u4e00-\u9fa5-]/g, '-').replace(/-+/g, '-').slice(0, 24)
+}
+
+function fmtTime(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 main().catch((err) => {

@@ -152,10 +152,16 @@ async function runAgent(messages: Message[], tools: ToolRegistry): Promise<strin
 
 **终止条件只有两个**：模型不再要工具 / 步数上限。没有别的。
 
-### 3.4 `session.ts` — JSONL 落盘
+### 3.4 `session.ts` — 会话层（v1.3 重写）
 
-- `load(file): Message[]` — 读回历史
-- `append(file, messages)` — 只追加**本次新增**的消息（按条数偏移量）
+```ts
+listSessions(): Promise<SessionInfo[]>          // 列出所有会话, 按更新时间倒序
+resolveSession(query?): Promise<Session | null> // 无 query → 最新; 有 → id/标题模糊匹配
+appendSession(id, messages, fromIndex)          // 只追加本次新增的消息
+```
+
+- 一个会话一个文件 `sessions/<id>.jsonl`（id = 毫秒时间戳，`--new <名字>` 带名字后缀）
+- 标题不存储：列出时从第一条 user 消息派生，避免维护元数据
 - 每次对话结束调用一次，一条消息一行
 
 ### 3.5 `permission.ts` — 权限策略层（v1.1 新增）
@@ -220,7 +226,7 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 |---|---|---|
 | ~~工具执行前检查~~ ✅ v1.1 已加 | 让 agent `rm` 一个文件，它真删了 → 于是有了 `permission.ts` | 实验 A → **Permission 层**（已实现，见 §3.6） |
 | ~~上下文裁剪~~ ✅ v1.2 已加 | 连续 10 回合上下文涨 26 倍（179 → 4653 tokens）→ 于是有了 `context.ts` | 实验 B → **Compaction / Summary**（已实现，见 §3.7） |
-| 多会话隔离 | JSONL 里混着好几天的对话 | 实验 C → **Session 对象**（现在是裸数组） |
+| ~~多会话隔离~~ ✅ v1.3 已加 | 两天两个任务混在同一个 JSONL，resume 后问"第一个任务"它答"第二个任务" → 于是重写了 `session.ts` | 实验 C → **Session 对象**（已实现，见 §3.4） |
 | 统一执行环境 | bash 的 cwd 和文件路径对不上，agent 找不着文件 | 实验 D → **Sandbox / Workspace** |
 | 多模型 | 想换 Claude/GPT，发现工具调用格式有差异 | 实验 E → **Model Adapter**（现在只有一个 openai-compatible 实现） |
 
@@ -229,6 +235,13 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 ---
 
 ## 6. 变更日志
+
+### v1.3 — 实验 C：会话混成一锅粥 → 一个会话一个文件（session.ts 重写）
+
+- 撞墙实测：两天两个任务写进同一个 session.jsonl，resume 后问"我们之前的第一个任务是什么"，模型把两天当成同一段对话，答"后续第二个任务是计算 57*43"
+- 修复：一个会话一个文件 `sessions/<id>.jsonl`；`--list` 列出、`--new <名字>` 新建、`--resume <id|关键字>` 恢复指定
+- 标题不存储，列出时从第一条 user 消息派生（不维护元数据）
+- 验证：会话 A（hello.py）恢复后只记得自己的任务，正确答出第一个任务，且明确 57*43 属于另一个会话
 
 ### v1.2 — 实验 B：上下文膨胀 → 压缩（context.ts + bench.ts）
 
@@ -262,3 +275,4 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 - `arguments` 是 JSON 字符串，`JSON.parse` 失败时把错误文本返回给模型而不是崩掉
 - 一个 turn 里多个 tool_calls 是并行的（API 行为），v1 顺序执行即可
 - 压缩会丢细节：摘要只保留要点，太久远的对话模型只能"凭印象"（损失压缩的代价）
+- 会话文件在 `sessions/` 目录（gitignore）；删除即忘，没有回收站
