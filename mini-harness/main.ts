@@ -10,6 +10,7 @@ import { createClientFromEnv } from './llm.ts'
 import { createDefaultTools } from './tools.ts'
 import { runAgent } from './agent-loop.ts'
 import { listSessions, resolveSession, appendSession } from './session.ts'
+import { WORKSPACE } from './workspace.ts'
 import type { Message } from './types.ts'
 
 const SYSTEM_PROMPT = `你是 wowo-agent，一个运行在用户电脑上的命令行助手。
@@ -86,7 +87,8 @@ async function main() {
     return answer === 'y' || answer === 'yes'
   }
 
-  console.log('wowo-agent (最简陋版) — 输入 exit 退出')
+  console.log(`wowo-agent (最简陋版) — 输入 exit 退出`)
+  console.log(`工作区: ${WORKSPACE} (WORKSPACE 环境变量可改)`)
 
   while (true) {
     const input = (await ask('\n你 > ')).trim()

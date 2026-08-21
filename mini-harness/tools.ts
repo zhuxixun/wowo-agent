@@ -1,10 +1,9 @@
-// 工具层：注册表 + 3 个内置工具。执行器只执行、不判断（没有权限、没有沙箱）
+// 工具层：注册表 + 3 个内置工具。执行器只执行、不判断（权限在 permission.ts，沙箱在 workspace.ts）
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { exec } from 'node:child_process'
+import { WORKSPACE, resolveInWorkspace } from './workspace.ts'
 import type { Tool, ToolSchema } from './types.ts'
-
-const WORKSPACE = process.cwd()
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>()
@@ -44,7 +43,8 @@ export function createDefaultTools(): ToolRegistry {
       required: ['path'],
     },
     async run({ path: p }) {
-      const full = path.resolve(WORKSPACE, String(p))
+      const full = resolveInWorkspace(String(p))
+      if (!full) return `沙箱拒绝: 路径在工作区之外: ${p}`
       const content = await fs.readFile(full, 'utf-8')
       const lines = content.split('\n')
       if (lines.length > 5000) {
@@ -66,7 +66,8 @@ export function createDefaultTools(): ToolRegistry {
       required: ['path', 'content'],
     },
     async run({ path: p, content }) {
-      const full = path.resolve(WORKSPACE, String(p))
+      const full = resolveInWorkspace(String(p))
+      if (!full) return `沙箱拒绝: 路径在工作区之外: ${p}`
       await fs.mkdir(path.dirname(full), { recursive: true })
       await fs.writeFile(full, String(content), 'utf-8')
       return `已写入 ${full} (${String(content).length} 字符)`

@@ -91,7 +91,7 @@ interface ToolCall {
 
 ---
 
-## 3. 八个模块
+## 3. 九个模块
 
 ### 3.1 `llm.ts` — 模型适配层（无状态）
 
@@ -202,9 +202,17 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 - **为什么从"最后一个 user 消息"切**：回合内可能有未完成的 tool_calls / tool 结果，从中间切开会产生非法消息序列，API 直接报错
 - 摘要也是 LLM 调用，因此 agent 的记忆是"损失压缩"——这是接受了的代价
 
-### 3.8 `bench.ts` — 基准脚本（v1.2 新增）
+### 3.9 `workspace.ts` — 工作区 / 沙箱（v1.4 新增）
 
-连续投喂 N 个任务，观察上下文增长。实验 B 的演示工具，也是 Phase 5 benchmark 的雏形。
+```ts
+export const WORKSPACE: string                 // 默认启动目录, WORKSPACE 环境变量可覆盖
+resolveInWorkspace(p): string | null           // 解析并检查; 逃逸返回 null
+isInsideWorkspace(fullPath): boolean
+```
+
+- 文件工具（read/write）硬性围栏：路径必须落在工作区内，逃逸直接拒绝
+- 权限层补充：bash 引用工作区外绝对路径 / `..` 相对穿越 → 需要用户确认
+- **诚实边界**：这是"文件工具级"沙箱。bash 里 `cd /`、python 里 `os.open()` 仍可绕——真正的沙箱是 OS 级进程隔离（docker/bwrap/seccomp），这就是为什么真实 Harness 有独立的 Sandbox 组件
 
 ---
 
@@ -227,7 +235,7 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 | ~~工具执行前检查~~ ✅ v1.1 已加 | 让 agent `rm` 一个文件，它真删了 → 于是有了 `permission.ts` | 实验 A → **Permission 层**（已实现，见 §3.6） |
 | ~~上下文裁剪~~ ✅ v1.2 已加 | 连续 10 回合上下文涨 26 倍（179 → 4653 tokens）→ 于是有了 `context.ts` | 实验 B → **Compaction / Summary**（已实现，见 §3.7） |
 | ~~多会话隔离~~ ✅ v1.3 已加 | 两天两个任务混在同一个 JSONL，resume 后问"第一个任务"它答"第二个任务" → 于是重写了 `session.ts` | 实验 C → **Session 对象**（已实现，见 §3.4） |
-| 统一执行环境 | bash 的 cwd 和文件路径对不上，agent 找不着文件 | 实验 D → **Sandbox / Workspace** |
+| ~~统一执行环境~~ ✅ v1.4 已加 | agent 直接读了 /tmp 下的"机密文件"，`../` 穿越畅通 → 于是有了 `workspace.ts` | 实验 D → **Sandbox / Workspace**（已实现，见 §3.9） |
 | 多模型 | 想换 Claude/GPT，发现工具调用格式有差异 | 实验 E → **Model Adapter**（现在只有一个 openai-compatible 实现） |
 
 **明确不做**：流式输出、token 计数、并发、多会话、思考/规划模块、JSON Schema 校验、流式 UI。
@@ -235,6 +243,13 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 ---
 
 ## 6. 变更日志
+
+### v1.4 — 实验 D：agent 能读机器上任何文件 → 工作区沙箱（workspace.ts）
+
+- 撞墙实测：让 agent 读 `/tmp/wowo-secret.txt`，它读到了还开玩笑说"我会保守秘密的"；`../README.md` 穿越也畅通
+- 修复：新增 workspace.ts 定义统一执行环境；文件工具硬性围栏（逃逸即拒）；权限层补 bash 绝对路径 + `..` 穿越检查
+- 后门实录：`read_file ../` 被拒后，agent 改用 `bash cat ../README.md` 得手 → 补上 `..` 规则 → 再测三层全堵住，agent 老实承认读不到
+- 诚实边界：工具级沙箱挡不住进程级逃逸（python os.open / cd /），真正的沙箱 = OS 级进程隔离，这是真实 Harness 有 Sandbox 组件的原因
 
 ### v1.3 — 实验 C：会话混成一锅粥 → 一个会话一个文件（session.ts 重写）
 
@@ -276,3 +291,4 @@ compactMessages(llm, messages)     // 旧历史压成摘要
 - 一个 turn 里多个 tool_calls 是并行的（API 行为），v1 顺序执行即可
 - 压缩会丢细节：摘要只保留要点，太久远的对话模型只能"凭印象"（损失压缩的代价）
 - 会话文件在 `sessions/` 目录（gitignore）；删除即忘，没有回收站
+- 沙箱是工具级的：bash 后门（`cd /`、python `os.open`）堵不住，要真隔离得上 OS 进程沙箱
