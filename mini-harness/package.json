@@ -1,0 +1,17 @@
+{
+  "name": "mini-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "最简陋版 agent harness — 一个 while 循环 + 一个 LLM + 一堆工具",
+  "scripts": {
+    "start": "tsx main.ts",
+    "resume": "tsx main.ts --resume",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
