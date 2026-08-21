@@ -9,7 +9,9 @@
 └── mini-harness/         # 自己从零写的 Mini Harness（~370 行，零运行时依赖）
     ├── DESIGN.md         # 架构蓝图（每撞一次墙就更新一版）
     ├── types.ts          # 唯一状态：messages 数组（OpenAI chat 格式）
-    ├── llm.ts            # 模型适配层（OpenAI 兼容，无状态）
+    ├── llm.ts            # 模型适配层工厂（openai / anthropic 按需切换）
+    ├── llm-openai.ts     # OpenAI 兼容适配器（DeepSeek 等，近乎直通）
+    ├── llm-anthropic.ts  # Anthropic 适配器（实验 E 撞墙产物，边界翻译 6 处差异）
     ├── agent-loop.ts     # 核心循环：请求 → 执行工具 → 循环
     ├── permission.ts     # 权限层（实验 A 撞墙产物）
     ├── context.ts        # 上下文压缩（实验 B 撞墙产物）
@@ -17,6 +19,7 @@
     ├── session.ts        # 会话层：一个会话一个文件（实验 C 撞墙产物）
     ├── workspace.ts      # 工作区沙箱：文件工具硬性围栏（实验 D 撞墙产物）
     ├── bench.ts          # 基准脚本：连续投喂任务看上下文增长
+    ├── mock-anthropic.ts # 本地 mock 的 Anthropic API（无 key 也能验证适配器）
     └── main.ts           # REPL 入口
 ```
 
@@ -31,6 +34,7 @@ npm start -- --resume         # 恢复最近会话
 npm start -- --resume hello   # 恢复指定会话（id/名字/标题模糊匹配）
 npm start -- --list           # 列出所有会话
 WORKSPACE=/path/to/dir npm start  # 指定工作区根目录（默认启动目录）
+LLM_PROVIDER=anthropic npm start   # 换 Anthropic（配合 ANTHROPIC_API_KEY / ANTHROPIC_MODEL）
 ```
 
 ## 撞墙记录约定
@@ -51,3 +55,4 @@ feat: 实验 X 撞墙 — 一句话说明发现了什么问题、加了什么
 | feat(context) | 实验 B：上下文 10 回合涨 26 倍 → 加 Compaction 压缩 |
 | feat(session) | 实验 C：两天任务混一个 JSONL → 一个会话一个文件 |
 | feat(workspace) | 实验 D：agent 偷读 /tmp 机密 → 工作区沙箱 + bash 后门补丁 |
+| feat(adapter) | 实验 E：OpenAI 格式被 Claude 拒 400 → Model Adapter + 本地 mock |

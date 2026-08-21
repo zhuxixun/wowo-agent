@@ -1,52 +1,25 @@
-// 模型适配层：无状态，只做一件事 — messages + tools → assistant 回复
+// 模型适配层工厂 (v1.5, 实验 E 撞墙产物)
+// 内部词汇表 (types.ts) 是 OpenAI 形状; 每种 provider 一个适配器, 在边界翻译。
+// 换模型 = 换环境变量, 一行代码不用改:
+//   LLM_PROVIDER=openai     (默认) DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL
+//   LLM_PROVIDER=anthropic          ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL
 import type { AssistantReply, Message, ToolSchema } from './types.ts'
+import { createOpenAIClientFromEnv } from './llm-openai.ts'
+import { createAnthropicClientFromEnv } from './llm-anthropic.ts'
 
-export class LLMClient {
-  constructor(
-    private opts: { apiKey: string; baseURL: string; model: string },
-  ) {}
-
-  async chat(messages: Message[], tools: ToolSchema[]): Promise<AssistantReply> {
-    const res = await fetch(`${this.opts.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.opts.apiKey}`,
-      },
-      body: JSON.stringify({ model: this.opts.model, messages, tools }),
-      signal: AbortSignal.timeout(120_000),
-    })
-
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`LLM API ${res.status}: ${text.slice(0, 500)}`)
-    }
-
-    const data = await res.json()
-    const choice = data.choices?.[0]
-    if (!choice?.message) throw new Error(`LLM API 返回异常: ${JSON.stringify(data).slice(0, 500)}`)
-
-    // 只保留 OpenAI 标准字段，丢弃 reasoning_content 等厂商扩展字段，
-    // 否则把回复原样塞回 messages 再发出去时，部分 API 会拒绝
-    const m = choice.message
-    const message: Message = {
-      role: 'assistant',
-      content: m.content ?? null,
-      ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
-    }
-
-    return { message, usage: data.usage }
-  }
+// 所有适配器都满足这个接口 — 这是 Harness 与 Model 的边界
+export interface LLMClient {
+  chat(messages: Message[], tools: ToolSchema[]): Promise<AssistantReply>
 }
 
 export function createClientFromEnv(): LLMClient {
-  const apiKey = process.env.DEEPSEEK_API_KEY
-  if (!apiKey) {
-    throw new Error('缺少环境变量 DEEPSEEK_API_KEY，例如: export DEEPSEEK_API_KEY=sk-xxx')
+  const provider = process.env.LLM_PROVIDER ?? 'openai'
+  switch (provider) {
+    case 'anthropic':
+      return createAnthropicClientFromEnv()
+    case 'openai':
+      return createOpenAIClientFromEnv()
+    default:
+      throw new Error(`未知 LLM_PROVIDER: ${provider} (支持 openai / anthropic)`)
   }
-  return new LLMClient({
-    apiKey,
-    baseURL: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
-    model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
-  })
 }

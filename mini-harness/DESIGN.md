@@ -91,21 +91,25 @@ interface ToolCall {
 
 ---
 
-## 3. 九个模块
+## 3. 十个模块
 
-### 3.1 `llm.ts` — 模型适配层（无状态）
+### 3.1 `llm.ts` — 模型适配层工厂（v1.5 拆分）
 
 ```ts
-interface LLMClient {
+interface LLMClient {                       // Harness 与 Model 的边界
   chat(messages: Message[], tools: ToolSchema[]): Promise<AssistantReply>
 }
-// AssistantReply = { message: Message(assistant), usage?: {…} }
+createClientFromEnv(): LLMClient             // 按 LLM_PROVIDER 选适配器
 ```
 
-- 用 Node 内置 `fetch` 调 `POST {baseURL}/chat/completions`
-- 配置走环境变量: `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`(默认 `https://api.deepseek.com`) / `DEEPSEEK_MODEL`(默认 `deepseek-chat`)
-- 不流式（全量等回复，最简陋）
-- 不做重试、不做超时之外的处理
+- 内部词汇表是 OpenAI 形状 → openai 适配器（`llm-openai.ts`）近乎直通，只做字段净化
+- anthropic 适配器（`llm-anthropic.ts`）在边界翻译 6 处差异：system 抽顶层、`tool` 角色→`tool_result` block、`tool_calls`→`tool_use` block、tools 形状、max_tokens 必填、连续 tool 消息合并
+- 换模型 = 换环境变量：`LLM_PROVIDER=openai|anthropic` + 各家 KEY/BASE_URL/MODEL
+- 不流式（全量等回复，最简陋）；不做重试
+
+### 3.10 `mock-anthropic.ts` — 本地 mock Anthropic API（v1.5 新增）
+
+复刻 Anthropic 的校验规则（角色、tools 形状、tool_result 紧邻）和响应形状。没有真 key 也能撞墙、也能验证适配器——也证明了实验 E 的墙是真的。
 
 ### 3.2 `tools.ts` — 工具注册表 + 3 个工具
 
@@ -236,13 +240,21 @@ isInsideWorkspace(fullPath): boolean
 | ~~上下文裁剪~~ ✅ v1.2 已加 | 连续 10 回合上下文涨 26 倍（179 → 4653 tokens）→ 于是有了 `context.ts` | 实验 B → **Compaction / Summary**（已实现，见 §3.7） |
 | ~~多会话隔离~~ ✅ v1.3 已加 | 两天两个任务混在同一个 JSONL，resume 后问"第一个任务"它答"第二个任务" → 于是重写了 `session.ts` | 实验 C → **Session 对象**（已实现，见 §3.4） |
 | ~~统一执行环境~~ ✅ v1.4 已加 | agent 直接读了 /tmp 下的"机密文件"，`../` 穿越畅通 → 于是有了 `workspace.ts` | 实验 D → **Sandbox / Workspace**（已实现，见 §3.9） |
-| 多模型 | 想换 Claude/GPT，发现工具调用格式有差异 | 实验 E → **Model Adapter**（现在只有一个 openai-compatible 实现） |
+| ~~多模型~~ ✅ v1.5 已加 | OpenAI 格式原样发给 Claude → 400 "Input should be 'user' or 'assistant'" → 于是有了适配器工厂 | 实验 E → **Model Adapter**（已实现，见 §3.1） |
 
 **明确不做**：流式输出、token 计数、并发、多会话、思考/规划模块、JSON Schema 校验、流式 UI。
 
 ---
 
 ## 6. 变更日志
+
+### v1.5 — 实验 E：换模型撞格式墙 → Model Adapter（llm.ts 拆成工厂 + 适配器）
+
+- 撞墙实测：OpenAI 格式（role:'system' + type:'function' 工具包装）原样发给 Anthropic → 400：`messages.role: Input should be 'user' or 'assistant' (got "system")`
+- 彩蛋：环境里没有真 Anthropic key（~/.zshrc 的 ANTHROPIC_AUTH_TOKEN 其实是 DeepSeek key 的复制品，直连 401）→ 写了 mock-anthropic.ts 复刻 Anthropic 校验规则，本地照样撞墙和验证
+- 修复：内部词汇表保持 OpenAI 形状，所有 provider 在边界翻译。llm-anthropic.ts 处理 6 处差异（见 §3.1）
+- 验证：mock 全链路（工具调用循环跑通）；翻译单测（system 抽取 / tool 消息合并 / 响应翻译）；DeepSeek 回归正常
+- 教训：**Adapter 的职责不是"适配所有模型"，而是把"我们的词汇表"翻译成"各家词汇表"**——所以内部词汇表只要选一个形状，其他都在边界翻译
 
 ### v1.4 — 实验 D：agent 能读机器上任何文件 → 工作区沙箱（workspace.ts）
 
@@ -292,3 +304,4 @@ isInsideWorkspace(fullPath): boolean
 - 压缩会丢细节：摘要只保留要点，太久远的对话模型只能"凭印象"（损失压缩的代价）
 - 会话文件在 `sessions/` 目录（gitignore）；删除即忘，没有回收站
 - 沙箱是工具级的：bash 后门（`cd /`、python `os.open`）堵不住，要真隔离得上 OS 进程沙箱
+- Anthropic 形状的坑：max_tokens 必填；tool_result 必须紧邻 tool_use 且在同一 user 消息里；arguments 是 JSON 字符串，Anthropic 要对象——这些都是适配器的活，别漏
