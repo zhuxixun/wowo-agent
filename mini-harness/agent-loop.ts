@@ -4,6 +4,7 @@ import type { LLMClient } from './llm.ts'
 import type { ToolRegistry } from './tools.ts'
 import type { Message } from './types.ts'
 import { decide } from './permission.ts'
+import { estimateTokens, shouldCompact, compactMessages } from './context.ts'
 
 const MAX_STEPS = 25
 
@@ -15,7 +16,18 @@ export async function runAgent(
   confirm: (question: string) => Promise<boolean> = async () => false,
 ): Promise<string> {
   for (let step = 1; step <= MAX_STEPS; step++) {
-    const { message } = await llm.chat(messages, tools.listSchemas())
+    // 实验 B 的墙: 上下文只增不减。超阈值就把旧历史压成摘要再继续
+    if (shouldCompact(messages)) {
+      console.log(`  [context] ~${estimateTokens(messages)} tokens 超限，压缩历史…`)
+      messages.splice(0, messages.length, ...(await compactMessages(llm, messages)))
+      console.log(`  [context] 压缩后 ~${estimateTokens(messages)} tokens`)
+    }
+
+    const { message, usage } = await llm.chat(messages, tools.listSchemas())
+    console.log(
+      `  [step ${step}] context ~${estimateTokens(messages)} tokens` +
+        (usage?.prompt_tokens ? ` (api prompt ${usage.prompt_tokens})` : ''),
+    )
     messages.push(message)
 
     const calls = message.tool_calls ?? []

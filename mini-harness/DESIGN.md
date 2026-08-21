@@ -25,6 +25,7 @@ v1 不引入任何额外概念（没有权限、没有沙箱、没有规划、�
 │              agent-loop.ts (核心循环)                 │
 │                                                     │
 │   while (步数 < MAX_STEPS):                         │
+│     messages 超阈值? ──▶ context.ts 压缩旧历史      │
 │     messages + tool schemas ──▶ llm.chat()          │
 │                                 │                   │
 │                    有 tool_calls ?                  │
@@ -90,7 +91,7 @@ interface ToolCall {
 
 ---
 
-## 3. 七个模块
+## 3. 八个模块
 
 ### 3.1 `llm.ts` — 模型适配层（无状态）
 
@@ -183,6 +184,24 @@ System prompt（就这些，不写花活）：
 回答要简洁，用中文。
 ```
 
+### 3.7 `context.ts` — 上下文管理（v1.2 新增）
+
+```ts
+estimateTokens(messages): number   // 粗略估算: 中英混合约 3 字符/token
+shouldCompact(messages): boolean   // 超阈值(默认 12K, 可环境变量调)
+compactMessages(llm, messages)     // 旧历史压成摘要
+```
+
+- 压缩策略: 保留 system + 当前回合，中间的旧消息让 LLM 总结成一条 `[历史摘要]`
+- **为什么从"最后一个 user 消息"切**：回合内可能有未完成的 tool_calls / tool 结果，从中间切开会产生非法消息序列，API 直接报错
+- 摘要也是 LLM 调用，因此 agent 的记忆是"损失压缩"——这是接受了的代价
+
+### 3.8 `bench.ts` — 基准脚本（v1.2 新增）
+
+连续投喂 N 个任务，观察上下文增长。实验 B 的演示工具，也是 Phase 5 benchmark 的雏形。
+
+---
+
 ---
 
 ## 4. 三个关键设计决策（以及为什么）
@@ -200,7 +219,7 @@ System prompt（就这些，不写花活）：
 | 现在没有 | 什么时候会痛 | 对应实验 → 将来长成什么 |
 |---|---|---|
 | ~~工具执行前检查~~ ✅ v1.1 已加 | 让 agent `rm` 一个文件，它真删了 → 于是有了 `permission.ts` | 实验 A → **Permission 层**（已实现，见 §3.6） |
-| 上下文裁剪 | 第 30 轮，token 爆炸，API 报错 | 实验 B → **Compaction / Summary** |
+| ~~上下文裁剪~~ ✅ v1.2 已加 | 连续 10 回合上下文涨 26 倍（179 → 4653 tokens）→ 于是有了 `context.ts` | 实验 B → **Compaction / Summary**（已实现，见 §3.7） |
 | 多会话隔离 | JSONL 里混着好几天的对话 | 实验 C → **Session 对象**（现在是裸数组） |
 | 统一执行环境 | bash 的 cwd 和文件路径对不上，agent 找不着文件 | 实验 D → **Sandbox / Workspace** |
 | 多模型 | 想换 Claude/GPT，发现工具调用格式有差异 | 实验 E → **Model Adapter**（现在只有一个 openai-compatible 实现） |
@@ -209,7 +228,16 @@ System prompt（就这些，不写花活）：
 
 ---
 
-## 6. v1.1 变更日志
+## 6. 变更日志
+
+### v1.2 — 实验 B：上下文膨胀 → 压缩（context.ts + bench.ts）
+
+- 撞墙数据：10 回合无压缩，上下文 179 → 4653 tokens（26 倍）；读大文件一跳 +3.5K
+- 修复：超阈值时把"已完成的旧对话"让 LLM 压成摘要，保留 system + 当前回合
+- 验证：阈值 4000，12 回合只压缩 1 次（4119 → 484），后续任务答案全部正确（1060 / 338350 / 56088 / 1073741824）
+- 已知局限：摘要式压缩是损失压缩，太久远的事实可能丢；压缩本身也消耗一次 LLM 调用
+
+### v1.1 — 实验 A：删文件 → 权限层（permission.ts）
 
 - 新增 `permission.ts`：执行前拦截，三种裁决 allow / ask / deny（来自实验 A 的撞墙）
 - 关键决策：
@@ -223,7 +251,7 @@ System prompt（就这些，不写花活）：
 1. `node main.ts` 输入 "写一个 hello.py 并用 python 运行它" → 能看到 `write_file → bash` 的工具调用序列 → 正确输出运行结果
 2. 输入 "把 hello.py 删掉" → 它真的删了（没有权限层，这就是实验 A 的触发点）
 3. 退出后 `node main.ts --resume` → 它记得之前的对话
-4. 数一数：总代码 ≤ 500 行（不含 DESIGN.md）
+4. 数一数：总代码 ≤ 500 行（不含 DESIGN.md、bench.ts）
 
 ---
 
@@ -233,3 +261,4 @@ System prompt（就这些，不写花活）：
 - `tool` 消息必须**按 tool_calls 的声明顺序**逐条追加，顺序错模型会报错
 - `arguments` 是 JSON 字符串，`JSON.parse` 失败时把错误文本返回给模型而不是崩掉
 - 一个 turn 里多个 tool_calls 是并行的（API 行为），v1 顺序执行即可
+- 压缩会丢细节：摘要只保留要点，太久远的对话模型只能"凭印象"（损失压缩的代价）

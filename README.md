@@ -12,8 +12,10 @@
     ├── llm.ts            # 模型适配层（OpenAI 兼容，无状态）
     ├── agent-loop.ts     # 核心循环：请求 → 执行工具 → 循环
     ├── permission.ts     # 权限层（实验 A 撞墙产物）
+    ├── context.ts        # 上下文压缩（实验 B 撞墙产物）
     ├── tools.ts          # 工具注册表 + read_file / write_file / bash
     ├── session.ts        # JSONL 会话落盘
+    ├── bench.ts          # 基准脚本：连续投喂任务看上下文增长
     └── main.ts           # REPL 入口
 ```
 
@@ -41,3 +43,4 @@ feat: 实验 X 撞墙 — 一句话说明发现了什么问题、加了什么
 | docs | 学习规划 + v1 架构设计 |
 | feat | Mini Harness v1 — 最小闭环 |
 | feat(permission) | 实验 A：让 agent 删文件，它真删了 → 加权限层 |
+| feat(context) | 实验 B：上下文 10 回合涨 26 倍 → 加 Compaction 压缩 |
